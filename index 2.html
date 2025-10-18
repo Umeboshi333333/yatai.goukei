@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>屋台会計ツール</title>
+<style>
+body { font-family: sans-serif; padding: 20px; max-width: 400px; margin: auto; }
+h1 { text-align: center; }
+
+.item-group { display: flex; gap: 10px; margin-bottom: 20px; }
+.item { flex: 1; }
+.label { font-size: 1.2em; margin-bottom: 5px; }
+.controls { display: flex; align-items: center; gap: 10px; }
+button { font-size: 1.2em; width: 40px; height: 40px; }
+.count { width: 40px; text-align: center; font-size: 1.2em; }
+.total { font-size: 1.5em; text-align: center; margin-top: 20px; }
+.reset, .save, .reset-sales { display: block; width: 100%; padding: 10px; font-size: 1.2em; margin-top: 10px; border: none; border-radius: 8px; }
+.reset { background-color: #f66; color: white; }
+.save { background-color: #66c; color: white; }
+.reset-sales { background-color: #c00; color: white; }
+.summary, .history { margin-top: 30px; padding: 10px; background: #eee; border-radius: 8px; }
+.history div { border-bottom: 1px solid #ccc; padding: 5px 0; }
+.delete-btn { background-color: #f66; color: white; border: none; padding: 2px 6px; margin-left: 5px; border-radius: 4px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div id="item-container"></div>
+
+<div class="total" id="total">合計: 0円</div>
+
+<button class="save" onclick="saveTransaction()">会計記録</button>
+<button class="reset" onclick="resetAll()">入力リセット</button>
+<button class="reset-sales" onclick="resetAllSales()">売上リセット</button>
+
+<div class="summary" id="summary">
+  <h3>本日売上合計：</h3>
+  <div id="summary-list">ま売上なし</div>
+</div>
+
+<div class="history" id="history">
+  <h3>会計履歴</h3>
+  <div id="history-list">履歴なし</div>
+</div>
+
+<script>
+// 商品リスト
+const itemsData = [
+  {name:"焼き鳥(塩) *3", price:600, group:"塩"},
+  {name:"焼き鳥(塩) *5", price:1000, group:"塩"},
+  {name:"焼き鳥(たれ) *3", price:600, group:"たれ"},
+  {name:"焼き鳥(たれ) *5", price:1000, group:"たれ"},
+  {name:"唐揚げ串", price:200},
+  {name:"フランク", price:200},
+  {name:"アメリカンドッグ", price:200},
+];
+
+const items = {};
+itemsData.forEach(i => items[i.name] = { price: i.price, count: 0 });
+
+// 商品カード描画
+function renderItems() {
+  const container = document.getElementById("item-container");
+  container.innerHTML = "";
+
+  // グループごとに横並び
+  const groups = {};
+  itemsData.forEach(i => {
+    const groupName = i.group || i.name; // グループ名がなければ個別扱い
+    if(!groups[groupName]) groups[groupName] = [];
+    groups[groupName].push(i);
+  });
+
+  for(const groupName in groups){
+    const groupDiv = document.createElement("div");
+    if(groups[groupName].length > 1) groupDiv.className = "item-group";
+
+    groups[groupName].forEach(i=>{
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = `
+        <div class="label">${i.name}（${i.price}円）</div>
+        <div class="controls">
+          <button onclick="changeCount('${i.name}', -1)">−</button>
+          <div class="count" id="count-${i.name}">0</div>
+          <button onclick="changeCount('${i.name}', 1)">＋</button>
+        </div>
+      `;
+      groupDiv.appendChild(div);
+    });
+
+    container.appendChild(groupDiv);
+  }
+}
+
+// 数量変更
+function changeCount(name, delta) {
+  items[name].count = Math.max(0, items[name].count + delta);
+  document.getElementById("count-" + name).textContent = items[name].count;
+  updateTotal();
+}
+
+// 合計更新
+function updateTotal() {
+  let total = 0;
+  for (let name in items) total += items[name].count * items[name].price;
+  document.getElementById("total").textContent = `合計: ${total}円`;
+}
+
+// 入力リセット
+function resetAll() {
+  for (let name in items) {
+    items[name].count = 0;
+    document.getElementById("count-" + name).textContent = "0";
+  }
+  updateTotal();
+}
+
+// 会計保存
+function saveTransaction() {
+  const transactionItems = {};
+  let hasItem = false;
+  for (let name in items) {
+    transactionItems[name] = items[name].count;
+    if(items[name].count>0) hasItem = true;
+  }
+  if(!hasItem){ alert("購入数が0です"); return; }
+
+  const totalPrice = Object.keys(transactionItems).reduce((sum,name)=>sum+transactionItems[name]*items[name].price,0);
+  const timestamp = new Date().toLocaleString();
+
+  const transaction = { time: timestamp, items: transactionItems, total: totalPrice };
+  let historyData = JSON.parse(localStorage.getItem("salesHistory")||"[]");
+  historyData.push(transaction);
+  localStorage.setItem("salesHistory", JSON.stringify(historyData));
+
+  alert("会計を記録しました！");
+  resetAll();
+  updateSummary();
+  renderHistory();
+}
+
+// 売上サマリー更新
+function updateSummary() {
+  const summary = {};
+  itemsData.forEach(i=>summary[i.name]=0);
+  const historyData = JSON.parse(localStorage.getItem("salesHistory")||"[]");
+  historyData.forEach(trx=>{
+    for(let name in trx.items) summary[name]+=trx.items[name];
+  });
+
+  const list = document.getElementById("summary-list");
+  list.innerHTML = Object.keys(summary).map(name=>`${name}：${summary[name]}個`).join("<br>");
+}
+
+// 売上リセット
+function resetAllSales() {
+  if(confirm("本当に売上データをリセットしますか？")) {
+    localStorage.removeItem("salesHistory");
+    updateSummary();
+    renderHistory();
+  }
+}
+
+// 履歴描画
+function renderHistory() {
+  const historyList = document.getElementById("history-list");
+  const historyData = JSON.parse(localStorage.getItem("salesHistory")||"[]");
+  if(historyData.length===0){ historyList.innerHTML="履歴なし。"; return; }
+
+  historyList.innerHTML="";
+  historyData.forEach((trx,index)=>{
+    const div = document.createElement("div");
+    let itemsText = Object.keys(trx.items).filter(name=>trx.items[name]>0)
+                      .map(name=>`${name}：${trx.items[name]}個`).join(", ");
+    div.innerHTML = `${trx.time} - ${itemsText} - 合計: ${trx.total}円
+      <button class="delete-btn" onclick="deleteHistory(${index})">削除</button>`;
+    historyList.appendChild(div);
+  });
+}
+
+// 履歴削除
+function deleteHistory(index){
+  let historyData = JSON.parse(localStorage.getItem("salesHistory")||"[]");
+  historyData.splice(index,1);
+  localStorage.setItem("salesHistory", JSON.stringify(historyData));
+  updateSummary();
+  renderHistory();
+}
+
+// 初期表示
+renderItems();
+updateTotal();
+updateSummary();
+renderHistory();
+</script>
+</body>
+</html>
